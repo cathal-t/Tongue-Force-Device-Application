@@ -123,6 +123,7 @@ def register_callbacks(app):
             if read_thread:
                 read_thread.join()
             close_serial_port()
+            close_serial_port()
             return True, ""
 
     # Callback to save the data to a CSV file
