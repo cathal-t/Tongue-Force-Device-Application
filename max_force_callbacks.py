@@ -101,63 +101,29 @@ def register_callbacks(app):
     )
     def start_stop_recording(start_clicks, stop_clicks, patient_id):
         global read_thread, current_timestamp
-        
-        # Start recording logic
         if start_clicks > stop_clicks:
             if not patient_id:
                 return True, "Please enter Patient ID."
-    
-            # Clear stop_event to allow the thread to start
+            
             stop_event.clear()
-    
-            # Clear any existing data points for a fresh start
             time_data.clear()
             sensor_data.clear()
-    
-            # Open the serial port and reset buffer
-            try:
-                open_serial_port()
-                serial_port.reset_input_buffer()  # Clear any stale data in the buffer
-            except Exception as e:
-                print(f"Error opening serial port: {e}")
-                return True, f"Error: Could not open serial port."
-    
-            # Generate a unique timestamp for the current recording session
+            open_serial_port()
+
+            # Generate timestamp for the current session
             current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-            # Start a new thread to read serial data
-            if read_thread is None or not read_thread.is_alive():
-                read_thread = threading.Thread(target=read_serial_data)
-                read_thread.start()
-    
-            # Enable graph updates and clear warnings
-            return False, ""
-    
-        # Stop recording logic
+
+            # Start the data reading thread
+            read_thread = threading.Thread(target=read_serial_data)
+            read_thread.start()
+
+            return False, ""  # Enable graph update and clear warning
         else:
-            # Signal the thread to stop reading
-            stop_event.set()
-    
-            # Add a small delay to ensure proper stopping of the thread
-            time.sleep(0.1)
-    
-            # Ensure the thread is properly terminated
-            if read_thread is not None:
-                read_thread.join(timeout=1)  # Allow the thread to terminate
-    
-            # Close the serial port, handle exceptions
-            try:
-                if serial_port.is_open:
-                    close_serial_port()
-            except Exception as e:
-                print(f"Error closing serial port: {e}")
-                return True, f"Error: Could not close serial port."
-    
-            # Disable graph updates and clear warnings
+            stop_event.set()  # Stop reading
+            if read_thread:
+                read_thread.join()
+            close_serial_port()
             return True, ""
-
-
-
 
     # Callback to save the data to a CSV file
     @app.callback(
