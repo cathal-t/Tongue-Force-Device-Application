@@ -7,7 +7,7 @@ ser = None
 stop_event = threading.Event()  # Event to signal the thread to stop
 time_data = []
 sensor_data = []
-max_sensor_value = 0
+max_sensor_value = None  # Initialize as None
 read_thread = None
 data_lock = threading.Lock()  # Lock to ensure thread safety
 
@@ -21,6 +21,7 @@ def open_serial_port():
             print(f"Serial port {ser.port} opened successfully.")
     except serial.SerialException as e:
         print(f"Error: {e}")
+        ser = None  # Ensure ser is None if opening fails
 
 # Function to close the serial port safely
 def close_serial_port():
@@ -32,6 +33,7 @@ def close_serial_port():
             print("Serial port closed.")
         except Exception as e:
             print(f"Error closing serial port: {e}")
+    ser = None  # Reset ser to None
 
 # Thread function to read serial data and update global variables
 def read_serial_data():
@@ -43,8 +45,8 @@ def read_serial_data():
             if ser and ser.is_open and ser.in_waiting:  # Check if data is available on the serial port
                 line = ser.readline().decode('utf-8', errors='replace').strip()  # Read and decode the serial input
 
-                if line.isdigit():  # Ensure the line contains valid integer data
-                    sensor_value = int(line)
+                try:
+                    sensor_value = float(line)
                     elapsed_time = time.time() - start_time
 
                     # Lock the data while updating to prevent race conditions
@@ -53,14 +55,15 @@ def read_serial_data():
                         sensor_data.append(sensor_value)
 
                         # Update max_sensor_value only if sensor_value is higher
-                        if sensor_value > max_sensor_value:
+                        if max_sensor_value is None or sensor_value > max_sensor_value:
                             max_sensor_value = sensor_value
                             print(f"New max sensor value: {max_sensor_value}")  # Debugging statement
 
-                else:
+                except ValueError:
                     print(f"Warning: Invalid data received: {line}")  # Print warning for invalid data
 
         except Exception as e:
             print(f"Error reading data: {e}")
 
-        time.sleep(0.0001)  # Small delay to prevent excessive CPU usage
+        time.sleep(0.01)  # Adjusted delay to prevent excessive CPU usage
+
