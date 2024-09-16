@@ -6,42 +6,38 @@ import plotly.graph_objs as go
 import os
 import sys
 import numpy as np
+import re
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import serial_utils
 
-import os
-import re
-
-# Load the calibration coefficients safely
-try:
-    with open(os.path.join(os.path.dirname(__file__), '..', 'calibration_data.txt'), 'r') as f:
-        data = f.read().strip()  # Strip any extra spaces or newlines
-        if data:
-            calibration_slope, calibration_intercept = map(float, data.split(','))
-        else:
-            raise ValueError("Empty calibration data")
-except (FileNotFoundError, ValueError):
-    # Use default calibration if the file is not found or data is invalid
-    calibration_slope, calibration_intercept = 1, 0
-    print("Warning: Calibration data not found or invalid. Using default values.")
+# Remove module-level calibration coefficients
 
 # Initialize current timestamp
 current_timestamp = None
 
-# Callback for updating the live graph and sensor values
 def register_callbacks(app):
+    # Callback for updating the live graph and sensor values
     @app.callback(
         Output('live-graph', 'figure'),
-        [Input('graph-update', 'n_intervals')]
+        [Input('graph-update', 'n_intervals')],
+        [State('shared-calibration-coefficients', 'data')]
     )
-    def update_graph(n):
+    def update_graph(n, calibration_coefficients):
         with serial_utils.data_lock:
             if len(serial_utils.time_data) == 0 or len(serial_utils.sensor_data) == 0:
                 return go.Figure()
 
             current_time = serial_utils.time_data[-1]
             window_start = max(0, current_time - 10)
+
+            # Extract calibration coefficients
+            if calibration_coefficients:
+                calibration_slope = calibration_coefficients.get('slope', 1)
+                calibration_intercept = calibration_coefficients.get('intercept', 0)
+            else:
+                calibration_slope = 1
+                calibration_intercept = 0
 
             # Apply calibration to the sensor values
             calibrated_sensor_data = [calibration_slope * s + calibration_intercept for s in serial_utils.sensor_data]
@@ -82,12 +78,21 @@ def register_callbacks(app):
             Output('sixty-percent', 'children'),
             Output('eighty-percent', 'children')
         ],
-        [Input('graph-update', 'n_intervals')]
+        [Input('graph-update', 'n_intervals')],
+        [State('shared-calibration-coefficients', 'data')]
     )
-    def update_live_and_max_value(n):
+    def update_live_and_max_value(n, calibration_coefficients):
         with serial_utils.data_lock:
             if not serial_utils.sensor_data:
                 return "N/A", "N/A", "N/A", "N/A", "N/A"
+
+            # Extract calibration coefficients
+            if calibration_coefficients:
+                calibration_slope = calibration_coefficients.get('slope', 1)
+                calibration_intercept = calibration_coefficients.get('intercept', 0)
+            else:
+                calibration_slope = 1
+                calibration_intercept = 0
 
             # Apply calibration to the current sensor value and max value
             current_value = calibration_slope * serial_utils.sensor_data[-1] + calibration_intercept
@@ -95,10 +100,6 @@ def register_callbacks(app):
                 calibration_slope * serial_utils.max_sensor_value + calibration_intercept
                 if serial_utils.max_sensor_value is not None else None
             )
-
-            # Debug statements
-            print(f"Debug: max_sensor_value = {serial_utils.max_sensor_value}, type = {type(serial_utils.max_sensor_value)}")
-            print(f"Debug: current_max_sensor_value = {current_max_sensor_value}, type = {type(current_max_sensor_value)}")
 
             # Calculate percentages
             if current_max_sensor_value is not None:
@@ -148,7 +149,6 @@ def register_callbacks(app):
 
         if start_clicks > stop_clicks:
             if not patient_id:
-                
                 return True, "Please enter Patient ID."
 
             serial_utils.stop_event.clear()
@@ -182,9 +182,12 @@ def register_callbacks(app):
     @app.callback(
         Output('save-confirmation', 'children'),
         [Input('save-button', 'n_clicks')],
-        [State('patient-id', 'value')]
+        [
+            State('patient-id', 'value'),
+            State('shared-calibration-coefficients', 'data')
+        ]
     )
-    def save_data_to_csv(n_clicks, patient_id):
+    def save_data_to_csv(n_clicks, patient_id, calibration_coefficients):
         global current_timestamp
         if n_clicks and n_clicks > 0 and patient_id:
             if not serial_utils.time_data:
@@ -192,6 +195,14 @@ def register_callbacks(app):
             if not current_timestamp:
                 current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
+            # Extract calibration coefficients
+            if calibration_coefficients:
+                calibration_slope = calibration_coefficients.get('slope', 1)
+                calibration_intercept = calibration_coefficients.get('intercept', 0)
+            else:
+                calibration_slope = 1
+                calibration_intercept = 0
+
             # Sanitize patient_id to remove invalid characters
             sanitized_patient_id = re.sub(r'[^A-Za-z0-9_\- ]+', '', patient_id)
             if not sanitized_patient_id:
@@ -239,4 +250,3 @@ def register_callbacks(app):
         elif n_clicks and n_clicks > 0 and not patient_id:
             return "Please enter Patient ID."
         return ""
-
