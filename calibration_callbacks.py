@@ -1,114 +1,204 @@
-from dash import Input, Output, State
+from dash import Input, Output, State, html, callback_context
 import numpy as np
-from dash import html
 from datetime import datetime
 import os
 import sys
 import threading
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.serial_utils import open_serial_port, close_serial_port, read_serial_data, stop_event, time_data, sensor_data, max_sensor_value, read_thread, data_lock
-
-# Store calibration data in memory
-calibration_data = []
-calibration_slope, calibration_intercept = 1, 0  # Default values
+from utils import serial_utils  # Import the serial_utils module
 
 def register_callbacks(app):
 
-    # Unified callback to start/stop recording sensor data and disable/enable graph update
+    # Callback to start/stop recording
     @app.callback(
-        [Output('graph-update-calibration', 'disabled'),
-         Output('live-sensor-value-calibration', 'children')],
-        [Input('start-button', 'n_clicks'),
-         Input('graph-update-calibration', 'n_intervals')],
-        [State('start-button', 'n_clicks')]
+        [
+            Output('start-button', 'disabled'),
+            Output('stop-button', 'disabled')
+        ],
+        [
+            Input('start-button', 'n_clicks'),
+            Input('stop-button', 'n_clicks')
+        ]
     )
-    def start_recording_and_update_live_value(start_clicks, n_intervals, start_clicks_state):
-        if start_clicks_state > 0:
-            stop_event.clear()  # Clear stop event to allow recording
-            time_data.clear()
-            sensor_data.clear()
-            open_serial_port()
+    def start_stop_recording(start_clicks, stop_clicks):
+        start_clicks = start_clicks or 0
+        stop_clicks = stop_clicks or 0
 
-            # Start data reading thread if not already running
-            global read_thread
-            if read_thread is None or not read_thread.is_alive():
-                read_thread = threading.Thread(target=read_serial_data)
-                read_thread.start()
+        if start_clicks > stop_clicks:
+            # Start recording
+            serial_utils.stop_event.clear()
+            with serial_utils.data_lock:
+                serial_utils.time_data.clear()
+                serial_utils.sensor_data.clear()
+                serial_utils.max_sensor_value = None
 
-            # Acquire live sensor value during recording
-            with data_lock:
-                current_sensor_value = sensor_data[-1] if sensor_data else "N/A"
-            return False, f"{current_sensor_value} N"  # Enable graph update and return live value
+            serial_utils.open_serial_port()
 
+            # Start data reading thread
+            if serial_utils.read_thread is None or not serial_utils.read_thread.is_alive():
+                serial_utils.read_thread = threading.Thread(target=serial_utils.read_serial_data)
+                serial_utils.read_thread.start()
+
+            return True, False  # Disable the start button, enable the stop button
+        elif stop_clicks > start_clicks:
+            # Stop recording
+            serial_utils.stop_event.set()
+            if serial_utils.read_thread and serial_utils.read_thread.is_alive():
+                serial_utils.read_thread.join()
+            serial_utils.close_serial_port()
+
+            return False, True  # Enable the start button, disable the stop button
         else:
-            stop_event.set()  # Stop the recording
-            if read_thread and read_thread.is_alive():
-                read_thread.join()
-            close_serial_port()
-            return True, "N/A"  # Disable graph update and reset sensor value
+            # Initial state
+            return False, True  # Enable start button, disable stop button
 
-    # Callback to add calibration data
+    # Callback to update live sensor value
     @app.callback(
-        Output('calibration-data-table', 'children'),
-        [Input('add-calibration-data-btn', 'n_clicks')],
+        Output('live-sensor-value-calibration', 'children'),
+        [Input('live-update-interval', 'n_intervals')],
+        [State('start-button', 'disabled')]
+    )
+    def update_live_sensor_value(n_intervals, start_button_disabled):
+        is_recording = start_button_disabled  # True when recording is active
+        if is_recording:
+            with serial_utils.data_lock:
+                if serial_utils.sensor_data:
+                    current_sensor_value = serial_utils.sensor_data[-1]
+                else:
+                    current_sensor_value = "N/A"
+            return f"{current_sensor_value}"
+        else:
+            return "N/A"
+
+    # Callback to update calibration data store
+    @app.callback(
+        Output('calibration-data-store', 'data'),
+        [Input('add-calibration-data-btn', 'n_clicks'),
+         Input('reset-calibration-btn', 'n_clicks')],
         [State('applied-weight-input', 'value'),
          State('sensor-value-input', 'value'),
-         State('start-button', 'n_clicks')]  # To check if recording is active
+         State('start-button', 'disabled'),
+         State('calibration-data-store', 'data')]
     )
-    def add_calibration_data(n_clicks, applied_weight, sensor_value, start_clicks):
-        if n_clicks > 0 and applied_weight is not None:
-            # If sensor value is not provided, use live sensor value
-            if start_clicks > 0 and not sensor_value:
-                with data_lock:
-                    sensor_value = sensor_data[-1] if sensor_data else None
+    def update_calibration_data(add_clicks, reset_clicks, applied_weight, sensor_value, start_button_disabled, data):
+        is_recording = start_button_disabled  # True when recording is active
+        ctx = callback_context
+        if not ctx.triggered:
+            return data
+        else:
+            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-            if sensor_value is not None:
-                calibration_data.append((applied_weight, sensor_value))
-                return generate_table(calibration_data)
-        return generate_table([])  # Return an empty table if no data
+        if data is None:
+            data = []
 
-    # Helper function to generate the table from calibration data
-    def generate_table(data):
-        table_header = [
-            html.Tr([html.Th("Applied Weight (Newtons)"), html.Th("Sensor Value")])
-        ]
-        table_rows = [
-            html.Tr([html.Td(weight), html.Td(sensor)]) for weight, sensor in data
-        ]
-        return html.Table(children=table_header + table_rows)
+        if button_id == 'add-calibration-data-btn':
+            if add_clicks and add_clicks > 0 and applied_weight is not None:
+                if sensor_value is None and is_recording:
+                    # Use live sensor value
+                    with serial_utils.data_lock:
+                        if serial_utils.sensor_data:
+                            sensor_value = serial_utils.sensor_data[-1]
+                        else:
+                            sensor_value = None
 
-    # Callback to calculate the line of best fit
+                if sensor_value is not None:
+                    # Avoid in-place mutation
+                    new_data = data.copy()
+                    new_data.append({'applied_weight': applied_weight, 'sensor_value': sensor_value})
+                    return new_data
+                else:
+                    return data
+            else:
+                return data
+
+        elif button_id == 'reset-calibration-btn':
+            # Clear the calibration data
+            return []
+        else:
+            return data
+
+    # Callback to update calibration data table
     @app.callback(
-        Output('calibration-result', 'children'),
-        [Input('calculate-fit-btn', 'n_clicks')]
+        Output('calibration-data-table', 'children'),
+        [Input('calibration-data-store', 'data')]
     )
-    def calculate_line_of_best_fit(n_clicks):
-        if n_clicks > 0 and len(calibration_data) >= 2:
-            applied_weights = np.array([point[0] for point in calibration_data])
-            sensor_values = np.array([point[1] for point in calibration_data])
+    def update_calibration_table(data):
+        if not data:
+            return html.Div("No calibration data added yet.")
+        else:
+            table_header = [
+                html.Tr([html.Th("Applied Weight (Newtons)"), html.Th("Sensor Value")])
+            ]
+            table_rows = [
+                html.Tr([html.Td(item['applied_weight']), html.Td(item['sensor_value'])]) for item in data
+            ]
+            return html.Table(children=table_header + table_rows, style={'margin': '0 auto'})
 
-            # Perform linear regression (best fit line)
-            slope, intercept = np.polyfit(sensor_values, applied_weights, 1)
-            
-            # Store calibration coefficients globally
-            global calibration_slope, calibration_intercept
-            calibration_slope = slope
-            calibration_intercept = intercept
+    # Callback to calculate the line of best fit and update coefficients store
+    @app.callback(
+        [
+            Output('calibration-result', 'children'),
+            Output('calibration-coefficients-store', 'data')
+        ],
+        [
+            Input('calculate-fit-btn', 'n_clicks'),
+            Input('reset-calibration-btn', 'n_clicks')
+        ],
+        [State('calibration-data-store', 'data')]
+    )
+    def update_calibration_result(calculate_clicks, reset_clicks, data):
+        ctx = callback_context
+        if not ctx.triggered:
+            return "", {}
+        else:
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-            return f"Line of Best Fit: Force = {slope:.4f} * Sensor Value + {intercept:.4f}"
-        return "Please enter more data for calibration."
+        if trigger_id == 'calculate-fit-btn':
+            if calculate_clicks and calculate_clicks > 0:
+                if data and len(data) >= 2:
+                    applied_weights = np.array([item['applied_weight'] for item in data])
+                    sensor_values = np.array([item['sensor_value'] for item in data])
+
+                    # Perform linear regression (best fit line)
+                    slope, intercept = np.polyfit(sensor_values, applied_weights, 1)
+
+                    # Create a dictionary to store the coefficients
+                    coefficients = {'slope': slope, 'intercept': intercept}
+
+                    result_text = f"Line of Best Fit: Force = {slope:.4f} * Sensor Value + {intercept:.4f}"
+                    return result_text, coefficients
+                else:
+                    return "Please enter at least two calibration data points.", {}
+            else:
+                return "", {}
+        elif trigger_id == 'reset-calibration-btn':
+            return "", {}  # Clear the calibration result and coefficients when reset is clicked
+        else:
+            return "", {}
 
     # Callback to save calibration data
     @app.callback(
         Output('calibration-save-confirmation', 'children'),
-        [Input('save-calibration-btn', 'n_clicks')]
+        [Input('save-calibration-btn', 'n_clicks')],
+        [State('calibration-coefficients-store', 'data')]
     )
-    def save_calibration_data(n_clicks):
-        if n_clicks > 0:
-            # Save calibration data with timestamp
-            filename = f'calibration_data_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
-            with open(filename, 'w') as f:
-                f.write(f'{calibration_slope},{calibration_intercept}')
-            return f"Calibration data saved to {filename}."
-        return ""
+    def save_calibration_data(n_clicks, coefficients):
+        if n_clicks and n_clicks > 0:
+            if not coefficients:
+                return "No calibration coefficients to save. Please calculate the line of best fit first."
+
+            # Extract slope and intercept
+            calibration_slope = coefficients.get('slope')
+            calibration_intercept = coefficients.get('intercept')
+
+            # Save calibration data
+            filename = os.path.join(os.path.dirname(__file__), '..', 'calibration_data.txt')
+            try:
+                with open(filename, 'w') as f:
+                    f.write(f'{calibration_slope},{calibration_intercept}')
+                return f"Calibration data saved."
+            except Exception as e:
+                return f"Error saving calibration data: {e}"
+        else:
+            return ""
