@@ -179,14 +179,17 @@ def register_callbacks(app):
 
     # Callback to save calibration data
     @app.callback(
-        Output('calibration-save-confirmation', 'children'),
+        [
+            Output('calibration-save-confirmation', 'children'),
+            Output('shared-calibration-coefficients', 'data')
+        ],
         [Input('save-calibration-btn', 'n_clicks')],
         [State('calibration-coefficients-store', 'data')]
     )
     def save_calibration_data(n_clicks, coefficients):
         if n_clicks and n_clicks > 0:
             if not coefficients:
-                return "No calibration coefficients to save. Please calculate the line of best fit first."
+                return "No calibration coefficients to save. Please calculate the line of best fit first.", {}
 
             # Extract slope and intercept
             calibration_slope = coefficients.get('slope')
@@ -197,8 +200,10 @@ def register_callbacks(app):
             try:
                 with open(filename, 'w') as f:
                     f.write(f'{calibration_slope},{calibration_intercept}')
-                return f"Calibration data saved."
+                # Update the shared calibration coefficients store
+                shared_coefficients = {'slope': calibration_slope, 'intercept': calibration_intercept}
+                return f"Calibration data saved.", shared_coefficients
             except Exception as e:
-                return f"Error saving calibration data: {e}"
+                return f"Error saving calibration data: {e}", {}
         else:
-            return ""
+            return "", {}
