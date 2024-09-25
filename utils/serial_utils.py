@@ -23,17 +23,19 @@ def open_serial_port():
         print(f"Error: {e}")
         ser = None  # Ensure ser is None if opening fails
 
-# Function to close the serial port safely
 def close_serial_port():
     global ser
+    print("Attempting to close serial port.")
     if ser and ser.is_open:
         try:
-            ser.flushInput()  # Flush the input buffer to ensure no data is left
-            ser.close()
-            print("Serial port closed.")
+            ser.flushInput()  # Flush the input buffer
+            ser.close()  # Close the serial port
+            print("Serial port closed successfully.")
         except Exception as e:
             print(f"Error closing serial port: {e}")
-    ser = None  # Reset ser to None
+    else:
+        print("Serial port already closed or not open.")  # Handle already closed port
+    ser = None  # Reset the serial object
 
 # Thread function to read serial data and update global variables
 def read_serial_data():
@@ -66,4 +68,3 @@ def read_serial_data():
             print(f"Error reading data: {e}")
 
         time.sleep(0.01)  # Adjusted delay to prevent excessive CPU usage
-
