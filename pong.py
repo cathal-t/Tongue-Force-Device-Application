@@ -5,7 +5,7 @@ import serial  # Import the pyserial library
 pygame.init()
 
 # Establish serial connection with Arduino (update the COM port accordingly)
-ser = serial.Serial('COM3', 9600)  # Replace 'COM5' with your actual COM port
+ser = serial.Serial('COM3', 9600)  # Replace 'COM3' with your actual COM port
 
 WIDTH, HEIGHT = 1200, 900
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -45,7 +45,7 @@ class Paddle:
 
 
 class Ball:
-    MAX_VEL = 7
+    MAX_VEL = 5
     COLOR = WHITE
 
     def __init__(self, x, y, radius):
@@ -137,11 +137,11 @@ def handle_left_paddle_movement(sensor_value, left_paddle):
         left_paddle.move(velocity)
 
 
-def handle_right_paddle_movement(keys, right_paddle):
-    # Handle keyboard input for right paddle
-    if keys[pygame.K_UP] and right_paddle.y - right_paddle.VEL >= 0:
+def handle_right_paddle_ai(ball, right_paddle):
+    # Simple AI that moves the right paddle based on the ball's y position
+    if ball.y < right_paddle.y and right_paddle.y - right_paddle.VEL >= 0:
         right_paddle.move(-right_paddle.VEL)
-    if keys[pygame.K_DOWN] and right_paddle.y + right_paddle.VEL + right_paddle.height <= HEIGHT:
+    elif ball.y > right_paddle.y + right_paddle.height and right_paddle.y + right_paddle.VEL + right_paddle.height <= HEIGHT:
         right_paddle.move(right_paddle.VEL)
 
 
@@ -176,9 +176,8 @@ def main():
 
             handle_left_paddle_movement(sensor_value, left_paddle)
 
-        # Handle right paddle movement with keyboard
-        keys = pygame.key.get_pressed()
-        handle_right_paddle_movement(keys, right_paddle)
+        # Control right paddle with AI
+        handle_right_paddle_ai(ball, right_paddle)
 
         ball.move()
         handle_collision(ball, left_paddle, right_paddle)
