@@ -1,4 +1,4 @@
-from dash import Input, Output, State
+from dash import Input, Output, State, callback_context
 from datetime import datetime
 import pandas as pd
 import threading
@@ -11,7 +11,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import serial_utils
 
-# Remove module-level calibration coefficients
 
 # Initialize current timestamp
 current_timestamp = None
@@ -137,8 +136,8 @@ def register_callbacks(app):
             Output('id-warning', 'children')
         ],
         [
-            Input('start-button', 'n_clicks'),
-            Input('stop-button', 'n_clicks')
+            Input('max-force-start-button', 'n_clicks'),
+            Input('max-force-stop-button', 'n_clicks')
         ],
         [State('patient-id', 'value')]
     )
@@ -146,38 +145,61 @@ def register_callbacks(app):
         global current_timestamp
         start_clicks = start_clicks or 0
         stop_clicks = stop_clicks or 0
-
-        if start_clicks > stop_clicks:
-            if not patient_id:
+    
+        print(f"Start clicks: {start_clicks}, Stop clicks: {stop_clicks}")
+    
+        ctx = callback_context
+        if not ctx.triggered:
+            return True, ""
+    
+        button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        print(f"Button clicked: {button_id}")
+    
+        if button_id == 'max-force-start-button':
+            print(f"Patient ID: '{patient_id}'")  # Debugging statement
+            if not patient_id or patient_id.strip() == "":
+                print("Start recording attempted without Patient ID.")
+    
+                print("Attempting to close serial port.")
+                serial_utils.close_serial_port()
+                print("Serial port closed due to missing Patient ID.")
+    
+                print("Exiting function due to missing Patient ID.")
                 return True, "Please enter Patient ID."
-
+    
+            print("Start recording clicked.")
+    
             serial_utils.stop_event.clear()
             with serial_utils.data_lock:
                 serial_utils.time_data.clear()
                 serial_utils.sensor_data.clear()
                 serial_utils.max_sensor_value = None
-
+    
             serial_utils.open_serial_port()
-
-            # Generate timestamp for the current session
+            print(f"Serial port opened successfully for Patient ID: {patient_id}")
+    
             current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-            # Start the data reading thread
+    
             if serial_utils.read_thread is None or not serial_utils.read_thread.is_alive():
                 serial_utils.read_thread = threading.Thread(target=serial_utils.read_serial_data)
                 serial_utils.read_thread.start()
-
-            return False, ""  # Enable graph update and clear warning
-        elif stop_clicks > 0 and stop_clicks >= start_clicks:
-            serial_utils.stop_event.set()  # Stop reading
+                print("Data reading thread started.")
+    
+            return False, ""
+    
+        elif button_id == 'max-force-stop-button':
+            print("Stop recording clicked.")
+            serial_utils.stop_event.set()
             if serial_utils.read_thread and serial_utils.read_thread.is_alive():
                 serial_utils.read_thread.join()
+                print("Data reading thread joined.")
             serial_utils.close_serial_port()
+            print("Serial port closed successfully.")
+    
             return True, ""
-        else:
-            # Neither button has been clicked yet
-            return True, ""
-
+    
+        return True, ""
+    
     # Callback to save the data to a CSV file
     @app.callback(
         Output('save-confirmation', 'children'),
