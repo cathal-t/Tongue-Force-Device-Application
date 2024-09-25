@@ -19,4 +19,13 @@
 ├── pong.py
 ├── FlappyBird/
 │   ├── flappy.py
-│   ├── img
+│   ├── img/
+│   │   ├──bg.png
+│   │   ├──bglong.png
+│   │   ├──bird1.png
+│   │   ├──bird2.png
+│   │   ├──bird3.png
+│   │   ├──ground.png
+│   │   ├──pipe.png
+│   │   ├──restart.png
+│   │   ├──spritesheet.png
