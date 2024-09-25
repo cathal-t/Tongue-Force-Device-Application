@@ -8,56 +8,77 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import serial_utils  # Import the serial_utils module
 
+
+
 def register_callbacks(app):
 
     # Callback to start/stop recording
     @app.callback(
         [
-            Output('start-button', 'disabled'),
-            Output('stop-button', 'disabled')
+            Output('calibration-start-button', 'disabled'),
+            Output('calibration-stop-button', 'disabled')
         ],
         [
-            Input('start-button', 'n_clicks'),
-            Input('stop-button', 'n_clicks')
+            Input('calibration-start-button', 'n_clicks'),
+            Input('calibration-stop-button', 'n_clicks')
         ]
     )
     def start_stop_recording(start_clicks, stop_clicks):
+        print(f"Start clicks: {start_clicks}, Stop clicks: {stop_clicks}")  # Debugging statement
+        
         start_clicks = start_clicks or 0
         stop_clicks = stop_clicks or 0
-
-        if start_clicks > stop_clicks:
+    
+        # Check which button triggered the callback
+        ctx = callback_context
+        if not ctx.triggered:
+            return False, True  # Initial state: start enabled, stop disabled
+        button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+        if button_id == 'calibration-start-button':
             # Start recording
+            print("Start recording clicked.")
             serial_utils.stop_event.clear()
             with serial_utils.data_lock:
                 serial_utils.time_data.clear()
                 serial_utils.sensor_data.clear()
                 serial_utils.max_sensor_value = None
-
+    
             serial_utils.open_serial_port()
-
+    
             # Start data reading thread
             if serial_utils.read_thread is None or not serial_utils.read_thread.is_alive():
                 serial_utils.read_thread = threading.Thread(target=serial_utils.read_serial_data)
                 serial_utils.read_thread.start()
-
+                print("Data reading thread started.")
+    
             return True, False  # Disable the start button, enable the stop button
-        elif stop_clicks > start_clicks:
+    
+        elif button_id == 'calibration-stop-button':
             # Stop recording
+            print("Stop recording clicked.")
             serial_utils.stop_event.set()
             if serial_utils.read_thread and serial_utils.read_thread.is_alive():
+                print("Joining thread...")
                 serial_utils.read_thread.join()
+                print("Thread joined successfully.")
             serial_utils.close_serial_port()
+            
+            # Clear the sensor data after stopping recording
+            with serial_utils.data_lock:
+                serial_utils.time_data.clear()
+                serial_utils.sensor_data.clear()
+                serial_utils.max_sensor_value = None
 
             return False, True  # Enable the start button, disable the stop button
-        else:
-            # Initial state
-            return False, True  # Enable start button, disable stop button
 
+        return False, True  # Fallback in case no button was clicked
+    
     # Callback to update live sensor value
     @app.callback(
         Output('live-sensor-value-calibration', 'children'),
         [Input('live-update-interval', 'n_intervals')],
-        [State('start-button', 'disabled')]
+        [State('calibration-start-button', 'disabled')]
     )
     def update_live_sensor_value(n_intervals, start_button_disabled):
         is_recording = start_button_disabled  # True when recording is active
@@ -78,7 +99,7 @@ def register_callbacks(app):
          Input('reset-calibration-btn', 'n_clicks')],
         [State('applied-weight-input', 'value'),
          State('sensor-value-input', 'value'),
-         State('start-button', 'disabled'),
+         State('calibration-start-button', 'disabled'),
          State('calibration-data-store', 'data')]
     )
     def update_calibration_data(add_clicks, reset_clicks, applied_weight, sensor_value, start_button_disabled, data):
