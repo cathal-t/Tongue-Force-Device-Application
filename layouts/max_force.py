@@ -1,7 +1,7 @@
 from dash import dcc, html
 
 layout = html.Div([
-    html.H1('Live Sensor Data Streaming', style={'textAlign': 'center', 'color': '#007BFF', 'margin-bottom': '40px'}),
+    html.H1('Live Sensor Data Streaming', style={'textAlign': 'center', 'color': '#007BFF', 'margin-bottom': '60px'}),
 
     # Patient ID input
     html.Div([
@@ -118,7 +118,7 @@ layout = html.Div([
 
     # Buttons to start/stop recording and save data
     html.Div([
-        html.Button('Start Recording', id='start-button', n_clicks=0, style={
+        html.Button('Start Recording', id='max-force-start-button', n_clicks=0, style={
             'background-color': '#007BFF',
             'color': '#fff',
             'padding': '15px 32px',
@@ -127,7 +127,7 @@ layout = html.Div([
             'font-size': '16px',
             'margin-right': '10px'
         }),
-        html.Button('Stop Recording', id='stop-button', n_clicks=0, style={
+        html.Button('Stop Recording', id='max-force-stop-button', n_clicks=0, style={
             'background-color': '#dc3545',
             'color': '#fff',
             'padding': '15px 32px',
