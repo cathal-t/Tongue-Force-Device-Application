@@ -11,7 +11,7 @@ layout = html.Div([
 
     # Start and Stop Recording Buttons
     html.Div([
-        html.Button("Start Recording", id="start-button", n_clicks=0, style={
+        html.Button("Start Recording", id="calibration-start-button", n_clicks=0, style={
             'background-color': '#007BFF',
             'color': '#fff',
             'padding': '10px 20px',
@@ -21,7 +21,7 @@ layout = html.Div([
             'margin-right': '10px',
             'cursor': 'pointer'
         }),
-        html.Button("Stop Recording", id="stop-button", n_clicks=0, style={
+        html.Button("Stop Recording", id="calibration-stop-button", n_clicks=0, style={
             'background-color': '#dc3545',
             'color': '#fff',
             'padding': '10px 20px',
