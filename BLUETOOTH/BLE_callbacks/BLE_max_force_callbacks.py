@@ -149,38 +149,40 @@ def register_callbacks(app):
         ctx = callback_context
         if not ctx.triggered:
             return True, ""
-
+    
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-
+    
         if button_id == 'max-force-start-button':
             if not patient_id or patient_id.strip() == "":
                 ble_utils.close_ble_connection()
                 return True, "Please enter Patient ID."
-
-            # Start BLE connection
-            ble_utils.stop_event.clear()
+    
+            # Clear data ONLY when starting a new recording
             with ble_utils.data_lock:
                 ble_utils.time_data.clear()
                 ble_utils.sensor_data.clear()
                 ble_utils.max_sensor_value = None
-
+    
+            # Start BLE connection
+            ble_utils.stop_event.clear()
             ble_utils.open_ble_connection()
             current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
+    
             if ble_utils.read_thread is None or not ble_utils.read_thread.is_alive():
                 ble_utils.read_thread = threading.Thread(target=lambda: asyncio.run(ble_utils.read_ble_data()))
                 ble_utils.read_thread.start()
-
-            return False, ""
-
+    
+            return False, ""  # Disable the start button, enable the stop button
+    
         elif button_id == 'max-force-stop-button':
+            # Stop BLE connection but DO NOT clear data here
             ble_utils.stop_event.set()
             if ble_utils.read_thread and ble_utils.read_thread.is_alive():
                 ble_utils.read_thread.join()
             ble_utils.close_ble_connection()
-
-            return True, ""
-
+    
+            return True, ""  # Enable the start button again
+    
         return True, ""
     
     # Callback to save the data to a CSV file
@@ -217,15 +219,22 @@ def register_callbacks(app):
             patient_folder = os.path.join('profiles', sanitized_patient_id)
             os.makedirs(patient_folder, exist_ok=True)
     
+            # Convert absolute time to relative time
+            initial_time = ble_utils.time_data[0]  # Reference timestamp (first recorded time)
+            relative_time_data = [t - initial_time for t in ble_utils.time_data]  # Relative time in seconds
+    
             # Create a filename with the current timestamp
             filename = f'{sanitized_patient_id}_{current_timestamp}.csv'
             filepath = os.path.join(patient_folder, filename)
+    
+            # Create DataFrame with relative time and calibrated sensor values
             df = pd.DataFrame({
-                'Time (s)': ble_utils.time_data,
+                'Time (s)': relative_time_data,  # Use relative time in seconds
                 'Sensor Value (Newtons)': [
                     calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data
                 ]
             })
+    
             try:
                 df.to_csv(filepath, index=False)
             except Exception as e:
@@ -255,3 +264,4 @@ def register_callbacks(app):
         elif n_clicks and n_clicks > 0 and not patient_id:
             return "Please enter Patient ID."
         return ""
+
