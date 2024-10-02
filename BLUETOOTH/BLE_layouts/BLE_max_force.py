@@ -3,6 +3,14 @@ from dash import dcc, html
 layout = html.Div([
     html.H1('Live Sensor Data Streaming', style={'textAlign': 'center', 'color': '#007BFF', 'margin-bottom': '60px'}),
 
+    # BLE Connectivity Status
+    html.Div(id='ble-connection-status', style={
+        'color': '#007BFF',
+        'font-size': '18px',
+        'textAlign': 'center',
+        'margin-bottom': '20px'
+    }),
+
     # Patient ID input
     html.Div([
         html.H3('Patient ID:', style={'color': '#333'}),
