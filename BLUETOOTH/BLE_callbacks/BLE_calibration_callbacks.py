@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import sys
 import threading
+import asyncio
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from BLE_utils import ble_utils  # Import the BLE utils module (formerly serial_utils)
@@ -85,6 +86,7 @@ def register_callbacks(app):
             with ble_utils.data_lock:
                 if ble_utils.sensor_data:
                     current_sensor_value = ble_utils.sensor_data[-1]
+                    current_sensor_value = round(current_sensor_value, 1)
                 else:
                     current_sensor_value = "N/A"
             return f"{current_sensor_value}"
