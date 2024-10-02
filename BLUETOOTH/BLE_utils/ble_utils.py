@@ -18,6 +18,8 @@ max_sensor_value = None
 stop_event = threading.Event()
 read_thread = None
 client = None  # BLE client object
+is_connected = False  # Tracks if BLE is connected
+is_connecting = False  # Tracks if connection is in progress
 
 # Logging for debug
 logging.basicConfig(level=logging.DEBUG)
@@ -53,11 +55,14 @@ def handle_notification(sender, data):
 
 # Function to start reading data from BLE
 async def read_ble_data():
-    global client
+    global client, is_connected, is_connecting
 
+    is_connecting = True  # Start the connection process
     try:
         async with BleakClient(DEVICE_ADDRESS) as client:
             logging.info(f"Connected to BLE device at {DEVICE_ADDRESS}")
+            is_connected = True  # Connection successful
+            is_connecting = False
             await client.start_notify(SENSOR_CHARACTERISTIC_UUID, handle_notification)
 
             # Keep running until stop event is triggered
@@ -69,26 +74,37 @@ async def read_ble_data():
 
     except Exception as e:
         logging.error(f"Failed to connect or read from BLE device: {e}")
+        is_connected = False  # Reset connection status on failure
+        is_connecting = False
+
+    finally:
+        is_connected = False
+        is_connecting = False
 
 # Wrapper to start BLE reading in a thread (similar to current threading model)
 def start_ble_thread():
-    global read_thread
+    global read_thread, is_connecting
     stop_event.clear()
-
+    
     if read_thread is None or not read_thread.is_alive():
         read_thread = threading.Thread(target=lambda: asyncio.run(read_ble_data()))
         read_thread.start()
         logging.info("BLE read thread started.")
+        is_connecting = True  # Mark the connection as being in progress
 
 # Function to stop the BLE thread and disconnect
 def stop_ble_thread():
+    global is_connected, is_connecting
     stop_event.set()
 
     if read_thread and read_thread.is_alive():
         read_thread.join()
         logging.info("BLE read thread stopped.")
 
-    # Reset data
+    # Reset flags and data
+    is_connected = False
+    is_connecting = False
+
     with data_lock:
         time_data.clear()
         sensor_data.clear()
@@ -96,15 +112,15 @@ def stop_ble_thread():
 
 # This function can be extended to handle reconnection attempts
 def reconnect_if_needed():
-    if not client or not client.is_connected:
+    if not client or not is_connected:
         logging.info("Attempting to reconnect...")
         start_ble_thread()
 
 # BLE-specific open connection function
 def open_ble_connection():
-    start_ble_thread()
+    if not is_connected and not is_connecting:
+        start_ble_thread()
 
 # BLE-specific close connection function
 def close_ble_connection():
     stop_ble_thread()
-
