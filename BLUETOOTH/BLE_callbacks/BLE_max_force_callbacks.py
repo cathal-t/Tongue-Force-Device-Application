@@ -199,46 +199,58 @@ def register_callbacks(app):
                 return "No data to save. Please record data first."
             if not current_timestamp:
                 current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
+            
             # Extract calibration coefficients
-            calibration_slope = calibration_coefficients.get('slope', 1) if calibration_coefficients else 1
-            calibration_intercept = calibration_coefficients.get('intercept', 0) if calibration_coefficients else 0
-
+            if calibration_coefficients:
+                calibration_slope = calibration_coefficients.get('slope', 1)
+                calibration_intercept = calibration_coefficients.get('intercept', 0)
+            else:
+                calibration_slope = 1
+                calibration_intercept = 0
+    
             # Sanitize patient_id to remove invalid characters
             sanitized_patient_id = re.sub(r'[^A-Za-z0-9_\- ]+', '', patient_id)
             if not sanitized_patient_id:
                 return "Invalid Patient ID."
-
-            # Use current working directory as base directory
-            base_dir = os.getcwd()
-            patient_folder = os.path.join(base_dir, 'profiles', sanitized_patient_id)
+            
+            # Create the patient's folder inside the 'profiles' directory
+            patient_folder = os.path.join('profiles', sanitized_patient_id)
             os.makedirs(patient_folder, exist_ok=True)
-
+    
             # Create a filename with the current timestamp
             filename = f'{sanitized_patient_id}_{current_timestamp}.csv'
             filepath = os.path.join(patient_folder, filename)
             df = pd.DataFrame({
-                'Time (s)': [t - ble_utils.time_data[0] for t in ble_utils.time_data],
-                'Sensor Value (Newtons)': [calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data]
+                'Time (s)': ble_utils.time_data,
+                'Sensor Value (Newtons)': [
+                    calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data
+                ]
             })
             try:
                 df.to_csv(filepath, index=False)
             except Exception as e:
                 return f"Error saving data: {e}"
-
-            # Save statistics
+    
+            # Calculate statistics
             max_force = df['Sensor Value (Newtons)'].max()
-            stats_filepath = os.path.join(patient_folder, f'statistics_{current_timestamp}.txt')
+            force_20 = max_force * 0.2
+            force_40 = max_force * 0.4
+            force_60 = max_force * 0.6
+            force_80 = max_force * 0.8
+    
+            # Save statistics to a separate file
+            stats_filename = f'statistics_{current_timestamp}.txt'
+            stats_filepath = os.path.join(patient_folder, stats_filename)
             try:
                 with open(stats_filepath, 'w') as stats_file:
                     stats_file.write(f'Max Force: {max_force:.2f} N\n')
-                    stats_file.write(f'20% of Max Force: {max_force * 0.2:.2f} N\n')
-                    stats_file.write(f'40% of Max Force: {max_force * 0.4:.2f} N\n')
-                    stats_file.write(f'60% of Max Force: {max_force * 0.6:.2f} N\n')
-                    stats_file.write(f'80% of Max Force: {max_force * 0.8:.2f} N\n')
+                    stats_file.write(f'20% of Max Force: {force_20:.2f} N\n')
+                    stats_file.write(f'40% of Max Force: {force_40:.2f} N\n')
+                    stats_file.write(f'60% of Max Force: {force_60:.2f} N\n')
+                    stats_file.write(f'80% of Max Force: {force_80:.2f} N\n')
             except Exception as e:
                 return f"Error saving statistics: {e}"
-
+    
             return f'Data saved to {filepath} and statistics saved to {stats_filepath}'
         elif n_clicks and n_clicks > 0 and not patient_id:
             return "Please enter Patient ID."
