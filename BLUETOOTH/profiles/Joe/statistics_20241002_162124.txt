@@ -1,0 +1,5 @@
+Max Force: 82.01 N
+20% of Max Force: 16.40 N
+40% of Max Force: 32.80 N
+60% of Max Force: 49.21 N
+80% of Max Force: 65.61 N
