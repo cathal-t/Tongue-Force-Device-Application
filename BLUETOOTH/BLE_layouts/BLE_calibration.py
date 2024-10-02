@@ -8,6 +8,14 @@ layout = html.Div([
         'color': '#333',
         'font-family': 'Arial, sans-serif'
     }),
+    
+    # Add the BLE Connectivity Status Display
+    html.Div(id='ble-connection-status_calibration', style={
+        'color': '#007BFF',
+        'font-size': '18px',
+        'textAlign': 'center',
+        'margin-bottom': '20px'
+    }),
 
     # Start and Stop Recording Buttons
     html.Div([
