@@ -105,10 +105,14 @@ def stop_ble_thread():
     is_connected = False
     is_connecting = False
 
-    with data_lock:
-        time_data.clear()
-        sensor_data.clear()
-        max_sensor_value = None
+# =============================================================================
+#     with data_lock:
+#         time_data.clear()
+#         sensor_data.clear()
+#         max_sensor_value = None
+# 
+# =============================================================================
+
 
 # This function can be extended to handle reconnection attempts
 def reconnect_if_needed():
