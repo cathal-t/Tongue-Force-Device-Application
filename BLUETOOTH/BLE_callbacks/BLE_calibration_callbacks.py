@@ -11,6 +11,19 @@ from BLE_utils import ble_utils  # Import the BLE utils module (formerly serial_
 
 
 def register_callbacks(app):
+    # Callback to monitor and update BLE connection status
+    @app.callback(
+        Output('ble-connection-status_calibration', 'children'),
+        [Input('live-update-interval', 'n_intervals')]
+    )
+    def update_ble_connection_status(n_intervals):
+        if ble_utils.is_connected:
+            return html.Div("Connected to BLE device.", style={'color': '#28a745', 'font-weight': 'bold'})
+        elif ble_utils.is_connecting:
+            return html.Div("Attempting to connect to BLE device...", style={'color': '#ffc107', 'font-weight': 'bold'})
+        else:
+            return html.Div("Disconnected from BLE device.", style={'color': '#dc3545', 'font-weight': 'bold'})
+    
 
     # Callback to start/stop recording
     @app.callback(
@@ -23,6 +36,7 @@ def register_callbacks(app):
             Input('calibration-stop-button', 'n_clicks')
         ]
     )
+
     def start_stop_recording(start_clicks, stop_clicks):
         print(f"Start clicks: {start_clicks}, Stop clicks: {stop_clicks}")  # Debugging statement
         
