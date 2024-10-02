@@ -1,22 +1,33 @@
-from dash import Input, Output, State, callback_context
+from dash import Input, Output, State, callback_context, html
 from datetime import datetime
 import pandas as pd
 import threading
 import plotly.graph_objs as go
 import os
 import sys
-import numpy as np
+import asyncio
 import re
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from BLE_utils import ble_utils  # Updated import to use BLE
-
-# Remove module-level calibration coefficients
+from BLE_utils import ble_utils
 
 # Initialize current timestamp
 current_timestamp = None
 
 def register_callbacks(app):
+    # Callback to monitor and update BLE connection status
+    @app.callback(
+        Output('ble-connection-status', 'children'),
+        [Input('graph-update', 'n_intervals')]
+    )
+    def update_ble_connection_status(n):
+        if ble_utils.is_connected:
+            return html.Div("Connected to BLE device.", style={'color': '#28a745', 'font-weight': 'bold'})
+        elif ble_utils.is_connecting:
+            return html.Div("Attempting to connect to BLE device...", style={'color': '#ffc107', 'font-weight': 'bold'})
+        else:
+            return html.Div("Disconnected from BLE device.", style={'color': '#dc3545', 'font-weight': 'bold'})
+
     # Callback for updating the live graph and sensor values
     @app.callback(
         Output('live-graph', 'figure'),
@@ -36,12 +47,8 @@ def register_callbacks(app):
             window_start = max(0, current_time - 10)
 
             # Extract calibration coefficients
-            if calibration_coefficients:
-                calibration_slope = calibration_coefficients.get('slope', 1)
-                calibration_intercept = calibration_coefficients.get('intercept', 0)
-            else:
-                calibration_slope = 1
-                calibration_intercept = 0
+            calibration_slope = calibration_coefficients.get('slope', 1) if calibration_coefficients else 1
+            calibration_intercept = calibration_coefficients.get('intercept', 0) if calibration_coefficients else 0
 
             # Apply calibration to the sensor values
             calibrated_sensor_data = [calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data]
@@ -65,7 +72,7 @@ def register_callbacks(app):
                 gridcolor='#ddd',
                 title='Sensor Value (Newtons)'  # Label y-axis
             ),
-            title='Live Sensor Data',
+            title='Live Sensor Data (Calibrated to Newtons)',
             plot_bgcolor='#fff',
             paper_bgcolor='#f4f4f4',
             font=dict(color='#333'),
@@ -92,12 +99,8 @@ def register_callbacks(app):
                 return "N/A", "N/A", "N/A", "N/A", "N/A"
 
             # Extract calibration coefficients
-            if calibration_coefficients:
-                calibration_slope = calibration_coefficients.get('slope', 1)
-                calibration_intercept = calibration_coefficients.get('intercept', 0)
-            else:
-                calibration_slope = 1
-                calibration_intercept = 0
+            calibration_slope = calibration_coefficients.get('slope', 1) if calibration_coefficients else 1
+            calibration_intercept = calibration_coefficients.get('intercept', 0) if calibration_coefficients else 0
 
             # Apply calibration to the current sensor value and max value
             current_value = calibration_slope * ble_utils.sensor_data[-1] + calibration_intercept
@@ -116,23 +119,14 @@ def register_callbacks(app):
 
         # Format the output strings
         def format_value(val):
-            if isinstance(val, (float, int, np.float64, np.float32, np.int64, np.int32)):
-                return f"{float(val):.1f}"  # Limit to one decimal place
-            else:
-                return "N/A"
-
-        current_value_str = format_value(current_value) + " N"
-        current_max_value_str = format_value(current_max_sensor_value) + " N"
-        forty_percent_str = format_value(forty_percent)
-        sixty_percent_str = format_value(sixty_percent)
-        eighty_percent_str = format_value(eighty_percent)
+            return f"{float(val):.1f}" if isinstance(val, (float, int)) else "N/A"
 
         return (
-            current_value_str,
-            current_max_value_str,
-            forty_percent_str,
-            sixty_percent_str,
-            eighty_percent_str
+            f"{format_value(current_value)} N",
+            f"{format_value(current_max_sensor_value)} N",
+            format_value(forty_percent),
+            format_value(sixty_percent),
+            format_value(eighty_percent)
         )
 
     # Callback to start/stop recording
@@ -152,58 +146,41 @@ def register_callbacks(app):
         start_clicks = start_clicks or 0
         stop_clicks = stop_clicks or 0
     
-        print(f"Start clicks: {start_clicks}, Stop clicks: {stop_clicks}")
-    
         ctx = callback_context
         if not ctx.triggered:
             return True, ""
-    
+
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        print(f"Button clicked: {button_id}")
-    
+
         if button_id == 'max-force-start-button':
-            print(f"Patient ID: '{patient_id}'")  # Debugging statement
             if not patient_id or patient_id.strip() == "":
-                print("Start recording attempted without Patient ID.")
-    
-                print("Attempting to close BLE connection.")
                 ble_utils.close_ble_connection()
-                print("BLE connection closed due to missing Patient ID.")
-    
-                print("Exiting function due to missing Patient ID.")
                 return True, "Please enter Patient ID."
-    
-            print("Start recording clicked.")
-    
+
+            # Start BLE connection
             ble_utils.stop_event.clear()
             with ble_utils.data_lock:
                 ble_utils.time_data.clear()
                 ble_utils.sensor_data.clear()
                 ble_utils.max_sensor_value = None
-    
+
             ble_utils.open_ble_connection()
-            print(f"BLE connection opened successfully for Patient ID: {patient_id}")
-    
             current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
             if ble_utils.read_thread is None or not ble_utils.read_thread.is_alive():
                 ble_utils.read_thread = threading.Thread(target=lambda: asyncio.run(ble_utils.read_ble_data()))
                 ble_utils.read_thread.start()
-                print("BLE data reading thread started.")
-    
+
             return False, ""
-    
+
         elif button_id == 'max-force-stop-button':
-            print("Stop recording clicked.")
             ble_utils.stop_event.set()
             if ble_utils.read_thread and ble_utils.read_thread.is_alive():
                 ble_utils.read_thread.join()
-                print("Data reading thread joined.")
             ble_utils.close_ble_connection()
-            print("BLE connection closed successfully.")
-    
+
             return True, ""
-    
+
         return True, ""
     
     # Callback to save the data to a CSV file
@@ -215,7 +192,6 @@ def register_callbacks(app):
             State('shared-calibration-coefficients', 'data')
         ]
     )
-    
     def save_data_to_csv(n_clicks, patient_id, calibration_coefficients):
         global current_timestamp
         if n_clicks and n_clicks > 0 and patient_id:
@@ -223,60 +199,46 @@ def register_callbacks(app):
                 return "No data to save. Please record data first."
             if not current_timestamp:
                 current_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
             # Extract calibration coefficients
-            if calibration_coefficients:
-                calibration_slope = calibration_coefficients.get('slope', 1)
-                calibration_intercept = calibration_coefficients.get('intercept', 0)
-            else:
-                calibration_slope = 1
-                calibration_intercept = 0
-    
+            calibration_slope = calibration_coefficients.get('slope', 1) if calibration_coefficients else 1
+            calibration_intercept = calibration_coefficients.get('intercept', 0) if calibration_coefficients else 0
+
             # Sanitize patient_id to remove invalid characters
             sanitized_patient_id = re.sub(r'[^A-Za-z0-9_\- ]+', '', patient_id)
             if not sanitized_patient_id:
                 return "Invalid Patient ID."
-    
+
             # Use current working directory as base directory
             base_dir = os.getcwd()
-            print("Directory {base_dir}") # This will point to C:\Users\catha\OneDrive - University College Dublin\Desktop\Research Assistant\BLUETOOTH
             patient_folder = os.path.join(base_dir, 'profiles', sanitized_patient_id)
             os.makedirs(patient_folder, exist_ok=True)
-    
+
             # Create a filename with the current timestamp
             filename = f'{sanitized_patient_id}_{current_timestamp}.csv'
             filepath = os.path.join(patient_folder, filename)
             df = pd.DataFrame({
-                'Time (s)': [t - ble_utils.time_data[0] for t in ble_utils.time_data],  # Store relative time in CSV
-                'Sensor Value (Newtons)': [
-                    calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data
-                ]
+                'Time (s)': [t - ble_utils.time_data[0] for t in ble_utils.time_data],
+                'Sensor Value (Newtons)': [calibration_slope * s + calibration_intercept for s in ble_utils.sensor_data]
             })
             try:
                 df.to_csv(filepath, index=False)
             except Exception as e:
                 return f"Error saving data: {e}"
-    
-            # Calculate statistics
+
+            # Save statistics
             max_force = df['Sensor Value (Newtons)'].max()
-            force_20 = max_force * 0.2
-            force_40 = max_force * 0.4
-            force_60 = max_force * 0.6
-            force_80 = max_force * 0.8
-    
-            # Save statistics to a separate file
-            stats_filename = f'statistics_{current_timestamp}.txt'
-            stats_filepath = os.path.join(patient_folder, stats_filename)
+            stats_filepath = os.path.join(patient_folder, f'statistics_{current_timestamp}.txt')
             try:
                 with open(stats_filepath, 'w') as stats_file:
                     stats_file.write(f'Max Force: {max_force:.2f} N\n')
-                    stats_file.write(f'20% of Max Force: {force_20:.2f} N\n')
-                    stats_file.write(f'40% of Max Force: {force_40:.2f} N\n')
-                    stats_file.write(f'60% of Max Force: {force_60:.2f} N\n')
-                    stats_file.write(f'80% of Max Force: {force_80:.2f} N\n')
+                    stats_file.write(f'20% of Max Force: {max_force * 0.2:.2f} N\n')
+                    stats_file.write(f'40% of Max Force: {max_force * 0.4:.2f} N\n')
+                    stats_file.write(f'60% of Max Force: {max_force * 0.6:.2f} N\n')
+                    stats_file.write(f'80% of Max Force: {max_force * 0.8:.2f} N\n')
             except Exception as e:
                 return f"Error saving statistics: {e}"
-    
+
             return f'Data saved to {filepath} and statistics saved to {stats_filepath}'
         elif n_clicks and n_clicks > 0 and not patient_id:
             return "Please enter Patient ID."
