@@ -48,4 +48,4 @@ BLE_arcade_callbacks.register_callbacks(app)
 BLE_calibration_callbacks.register_callbacks(app)  # Register BLE callbacks
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
