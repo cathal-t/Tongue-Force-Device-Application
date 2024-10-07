@@ -3,7 +3,9 @@ from BLE_layouts import BLE_max_force, BLE_calibration, BLE_arcade, BLE_home
 from BLE_callbacks import BLE_max_force_callbacks, BLE_navigation_callbacks, BLE_arcade_callbacks, BLE_calibration_callbacks  # Use the new BLE calibration callbacks
 import os
 
-app = Dash(__name__)
+import dash_bootstrap_components as dbc
+
+app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
 
 def load_calibration_data():
     try:
