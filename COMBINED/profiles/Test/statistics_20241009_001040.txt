@@ -1,0 +1,5 @@
+Max Force: 0.00 N
+20% of Max Force: 0.00 N
+40% of Max Force: 0.00 N
+60% of Max Force: 0.00 N
+80% of Max Force: 0.00 N
