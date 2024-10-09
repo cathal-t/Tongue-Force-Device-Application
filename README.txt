@@ -1,3 +1,7 @@
+To download the code, press the green "<>Code" button and press "ZIP Download"
+
+
+
 /Research Assistant/
 ├── app.py
 ├── callbacks/
