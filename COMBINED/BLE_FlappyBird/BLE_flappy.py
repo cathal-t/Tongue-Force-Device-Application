@@ -1,16 +1,16 @@
 import pygame
-import serial  # Import pyserial for communication with Arduino
+import asyncio
+from bleak import BleakClient
+import threading
 from pygame.locals import *
 import random
 import os
+import struct
 
 # Get the directory where flappy.py is located
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 pygame.init()
-
-# Establish serial connection with Arduino
-ser = serial.Serial('COM3', 9600)  # Replace with your correct COM port
 
 clock = pygame.time.Clock()
 fps = 60
@@ -20,7 +20,6 @@ screen_height = 936
 
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption('Flappy Bird')
-
 
 # Define font
 font = pygame.font.SysFont('Bauhaus 93', 60)
@@ -44,12 +43,10 @@ bg = pygame.image.load(os.path.join(base_dir, 'img', 'bg.png'))
 ground_img = pygame.image.load(os.path.join(base_dir, 'img', 'ground.png'))
 button_img = pygame.image.load(os.path.join(base_dir, 'img', 'restart.png'))
 
-
 # Function for outputting text onto the screen
 def draw_text(text, font, text_col, x, y):
     img = font.render(text, True, text_col)
     screen.blit(img, (x, y))
-
 
 def reset_game():
     pipe_group.empty()
@@ -57,7 +54,6 @@ def reset_game():
     flappy.rect.y = int(screen_height / 2)
     score = 0
     return score
-
 
 class Bird(pygame.sprite.Sprite):
 
@@ -78,7 +74,7 @@ class Bird(pygame.sprite.Sprite):
 
     def update(self):
 
-        if flying == True:
+        if flying:
             # Apply gravity
             self.vel += 0.5
             if self.vel > 8:
@@ -86,17 +82,14 @@ class Bird(pygame.sprite.Sprite):
             if self.rect.bottom < 768:
                 self.rect.y += int(self.vel)
 
-        if game_over == False:
+        if not game_over:
             # Instead of mouse input, use sensor to trigger jump
-            if ser.in_waiting > 0:  # Check if data is available from the Arduino
-                try:
-                    sensor_value = int(ser.readline().decode('utf-8').strip())
-                except ValueError:
-                    sensor_value = 0  # Handle any invalid data
-                if sensor_value > sensor_threshold and self.clicked == False:  # Set threshold for sensor value
+            sensor_value = ble_handler.get_value()
+            if sensor_value is not None:
+                if sensor_value > sensor_threshold and not self.clicked:
                     self.clicked = True
                     self.vel = -10
-                if sensor_value < sensor_threshold:
+                if sensor_value <= sensor_threshold:
                     self.clicked = False
 
             # Handle the animation
@@ -116,7 +109,6 @@ class Bird(pygame.sprite.Sprite):
             # Point the bird at the ground
             self.image = pygame.transform.rotate(self.images[self.index], -90)
 
-
 class Pipe(pygame.sprite.Sprite):
 
     def __init__(self, x, y, position):
@@ -135,7 +127,6 @@ class Pipe(pygame.sprite.Sprite):
         self.rect.x -= scroll_speed
         if self.rect.right < 0:
             self.kill()
-
 
 class Button():
     def __init__(self, x, y, image):
@@ -159,6 +150,67 @@ class Button():
 
         return action
 
+class BLEHandler:
+    def __init__(self, address, characteristic_uuid):
+        self.address = address
+        self.characteristic_uuid = characteristic_uuid
+        self.loop = asyncio.new_event_loop()
+        self.client = BleakClient(self.address, loop=self.loop)
+        self.latest_value = None
+        self.lock = threading.Lock()
+        self.connected_event = threading.Event()
+
+    def start(self):
+        # Start the event loop in a separate thread
+        threading.Thread(target=self.run_loop, daemon=True).start()
+        # Wait for connection to be established
+        self.connected_event.wait()
+
+    def run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.connect_and_listen())
+
+    async def connect_and_listen(self):
+        try:
+            await self.client.connect()
+            self.connected_event.set()
+            await self.client.start_notify(self.characteristic_uuid, self.handle_notification)
+            # Keep the loop running as long as the client is connected
+            while self.client.is_connected:
+                await asyncio.sleep(1)
+        except Exception as e:
+            print(f"BLE connection error: {e}")
+
+    def handle_notification(self, sender, data):
+        # Process the data and update latest_value
+        try:
+            # Assuming data is a 32-bit float
+            value = struct.unpack('f', data)[0]
+            with self.lock:
+                self.latest_value = value
+        except Exception as e:
+            print(f"Error processing BLE notification: {e}")
+
+    def get_value(self):
+        with self.lock:
+            return self.latest_value
+
+    def stop(self):
+        # Schedule disconnect on the event loop
+        future = asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop)
+        try:
+            future.result(timeout=5)
+        except Exception as e:
+            print(f"BLE disconnection error: {e}")
+
+    async def disconnect(self):
+        try:
+            await self.client.stop_notify(self.characteristic_uuid)
+            await self.client.disconnect()
+        except Exception as e:
+            print(f"BLE disconnection error: {e}")
+        finally:
+            self.loop.stop()
 
 pipe_group = pygame.sprite.Group()
 bird_group = pygame.sprite.Group()
@@ -169,6 +221,14 @@ bird_group.add(flappy)
 
 # Create restart button instance
 button = Button(screen_width // 2 - 50, screen_height // 2 - 100, button_img)
+
+# Initialize the BLEHandler
+BLE_DEVICE_ADDRESS = "96:18:FC:FA:30:FA"  # Replace with your BLE device's address
+SENSOR_CHARACTERISTIC_UUID = "12345678-1234-5678-1234-56789abcdef1"  # Replace with your characteristic UUID
+ble_handler = BLEHandler(BLE_DEVICE_ADDRESS, SENSOR_CHARACTERISTIC_UUID)
+print("Connecting to BLE device...")
+ble_handler.start()
+print("Connected to BLE device.")
 
 run = True
 while run:
@@ -189,9 +249,9 @@ while run:
     if len(pipe_group) > 0:
         if bird_group.sprites()[0].rect.left > pipe_group.sprites()[0].rect.left \
                 and bird_group.sprites()[0].rect.right < pipe_group.sprites()[0].rect.right \
-                and pass_pipe == False:
+                and not pass_pipe:
             pass_pipe = True
-        if pass_pipe == True:
+        if pass_pipe:
             if bird_group.sprites()[0].rect.left > pipe_group.sprites()[0].rect.right:
                 score += 1
                 pass_pipe = False
@@ -205,7 +265,7 @@ while run:
         game_over = True
         flying = False
 
-    if flying == True and game_over == False:
+    if flying and not game_over:
         # Generate new pipes
         time_now = pygame.time.get_ticks()
         if time_now - last_pipe > pipe_frequency:
@@ -223,21 +283,18 @@ while run:
             ground_scroll = 0
 
     # Check for game over and reset
-    if game_over == True:
+    if game_over:
         if button.draw():
             game_over = False
             score = reset_game()
 
     # Check if the force sensor should start the game
-    if flying == False and game_over == False:
-        if ser.in_waiting > 0:
-            try:
-                sensor_value = int(ser.readline().decode('utf-8').strip())
-                # If the sensor value crosses the threshold, start the game
-                if sensor_value > 100:
-                    flying = True
-            except ValueError:
-                pass  # Handle invalid serial data
+    if not flying and not game_over:
+        sensor_value = ble_handler.get_value()
+        if sensor_value is not None:
+            # If the sensor value crosses the threshold, start the game
+            if sensor_value > sensor_threshold:
+                flying = True
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -246,4 +303,6 @@ while run:
     pygame.display.update()
 
 pygame.quit()
-ser.close()  # Close the serial connection when quitting the game
+print("Disconnecting from BLE device...")
+ble_handler.stop()
+print("Disconnected from BLE device.")
