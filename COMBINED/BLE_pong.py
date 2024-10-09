@@ -1,5 +1,8 @@
 import pygame
-from communication_handler import CommunicationHandler  # Import the communication handler
+import asyncio
+from bleak import BleakClient
+import threading
+import struct
 
 # Initialize Pygame
 pygame.init()
@@ -8,7 +11,7 @@ WIDTH, HEIGHT = 1200, 900
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Pong")
 
-FPS = 60
+FPS = 90
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -31,7 +34,7 @@ class Paddle:
 
     def draw(self, win):
         pygame.draw.rect(
-            win, self.COLOR, (self.x, self.y, self.width, self.height))
+            win, self.COLOR, (int(self.x), int(self.y), self.width, self.height))
 
     def move(self, vel):
         self.y += vel
@@ -114,11 +117,13 @@ def handle_collision(ball, left_paddle, right_paddle):
 
 def handle_left_paddle_movement(sensor_value, left_paddle):
     # Adjust the following values based on your sensor's output range
-    max_sensor_value = 1023  # For analogRead from Arduino (0-1023)
-    mid_value = max_sensor_value // 2
+    max_sensor_value = 60  # For analogRead from Arduino (0-1023)
+    mid_value = max_sensor_value / 2
+
+    # Dead zone to prevent paddle jitter
+    dead_zone = 5  # Adjust as needed
 
     # Calculate velocity based on sensor input
-    dead_zone = 50  # Adjust dead zone as needed
     if sensor_value > mid_value + dead_zone:
         velocity = left_paddle.VEL
     elif sensor_value < mid_value - dead_zone:
@@ -137,21 +142,79 @@ def handle_right_paddle_ai(ball, right_paddle):
     elif ball.y > right_paddle.y + right_paddle.height / 2 and right_paddle.y + right_paddle.VEL + right_paddle.height <= HEIGHT:
         right_paddle.move(right_paddle.VEL)
 
+class BLEHandler:
+    def __init__(self, address, characteristic_uuid):
+        self.address = address
+        self.characteristic_uuid = characteristic_uuid
+        self.loop = asyncio.new_event_loop()
+        self.client = BleakClient(self.address, loop=self.loop)
+        self.latest_value = None
+        self.lock = threading.Lock()
+        self.connected_event = threading.Event()
+
+    def start(self):
+        # Start the event loop in a separate thread
+        threading.Thread(target=self.run_loop, daemon=True).start()
+        # Wait for connection to be established
+        self.connected_event.wait()
+
+    def run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.connect_and_listen())
+
+    async def connect_and_listen(self):
+        try:
+            await self.client.connect()
+            self.connected_event.set()
+            await self.client.start_notify(self.characteristic_uuid, self.handle_notification)
+            # Keep the loop running as long as the client is connected
+            while self.client.is_connected:
+                await asyncio.sleep(1)
+        except Exception as e:
+            print(f"BLE connection error: {e}")
+
+    def handle_notification(self, sender, data):
+        # Process the data and update latest_value
+        try:
+            # Assuming data is a 32-bit float
+            value = struct.unpack('f', data)[0]
+            with self.lock:
+                self.latest_value = value
+        except Exception as e:
+            print(f"Error processing BLE notification: {e}")
+
+    def get_value(self):
+        with self.lock:
+            return self.latest_value
+
+    def stop(self):
+        # Schedule disconnect on the event loop
+        future = asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop)
+        try:
+            future.result(timeout=5)
+        except Exception as e:
+            print(f"BLE disconnection error: {e}")
+
+    async def disconnect(self):
+        try:
+            await self.client.stop_notify(self.characteristic_uuid)
+            await self.client.disconnect()
+        except Exception as e:
+            print(f"BLE disconnection error: {e}")
+        finally:
+            self.loop.stop()
+
 def main():
     run = True
     clock = pygame.time.Clock()
 
-    # Initialize the communication handler
-    MODE = 'BLE'  # Set to 'BLE' or 'SERIAL'
-    comm_handler = CommunicationHandler(mode=MODE)
-    if MODE == 'SERIAL':
-        comm_handler.serial_port = 'COM6'  # Replace with your serial port
-        comm_handler.baudrate = 9600
-    elif MODE == 'BLE':
-        comm_handler.device_address = '96:18:FC:FA:30:FA'  # Replace with your BLE device address
-        comm_handler.ble_characteristic_uuid = '12345678-1234-5678-1234-56789abcdef1'  # Replace with your characteristic UUID
-
-    comm_handler.start()  # Start reading data
+    # Initialize the BLEHandler
+    BLE_DEVICE_ADDRESS = "96:18:FC:FA:30:FA"  # Replace with your device's address
+    SENSOR_CHARACTERISTIC_UUID = "12345678-1234-5678-1234-56789abcdef1"  # Replace with your characteristic UUID
+    ble_handler = BLEHandler(BLE_DEVICE_ADDRESS, SENSOR_CHARACTERISTIC_UUID)
+    print("Connecting to BLE device...")
+    ble_handler.start()
+    print("Connected to BLE device.")
 
     left_paddle = Paddle(10, HEIGHT//2 - PADDLE_HEIGHT //
                          2, PADDLE_WIDTH, PADDLE_HEIGHT)
@@ -171,8 +234,8 @@ def main():
                 run = False
                 break
 
-        # Read sensor data from comm_handler
-        sensor_value = comm_handler.get_sensor_value()
+        # Read sensor data from BLE
+        sensor_value = ble_handler.get_value()
         if sensor_value is not None:
             handle_left_paddle_movement(sensor_value, left_paddle)
 
@@ -210,7 +273,9 @@ def main():
             right_score = 0
 
     pygame.quit()
-    comm_handler.stop()  # Stop reading data when quitting the game
+    print("Disconnecting from BLE device...")
+    ble_handler.stop()
+    print("Disconnected from BLE device.")
 
 if __name__ == '__main__':
     main()
