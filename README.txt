@@ -1,6 +1,7 @@
 To download the code, press the green "<>Code" button and press "ZIP Download"
 
-
+Open the COMBINED folder and run app.py.
+The browser should open automatically and the dashboard should load in.
 
 /COMBINED/
 ├── app.py
